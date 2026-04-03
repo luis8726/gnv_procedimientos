@@ -1,6 +1,5 @@
 """
-app.py — Streamlit MVP con worker SQS integrado en background thread.
-Un solo proceso, compatible con el free tier de Render.
+app.py — Streamlit MVP. Lee archivos directamente desde OpenAI VS.
 """
 
 import os
@@ -21,8 +20,9 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-from sync.state import get_tracked_files, get_sync_status, get_vector_store_id
+from sync.state import get_sync_status, get_vector_store_id
 from chat.chat_engine import chat
+from vectorstore.vs_manager import get_client
 
 # ── Estilos ───────────────────────────────────────────────────────────────────
 st.markdown("""
@@ -36,30 +36,26 @@ st.markdown("""
     .sync-banner { background: #1a1f2e; border: 1px solid #2a3a5a; border-left: 3px solid #4a9eff; border-radius: 8px; padding: 8px 14px; margin-bottom: 12px; font-size: 0.82rem; color: #7ab8ff; }
     .file-item { background: #1e1e28; border: 1px solid #2a2a38; border-radius: 8px; padding: 8px 12px; margin: 4px 0; font-size: 0.8rem; color: #a8a6b0; }
     .file-item-name { color: #d8d6d0; font-weight: 500; font-size: 0.82rem; }
-    .stTextInput input { background: #1a1a23 !important; border: 1px solid #2a2a38 !important; color: #e8e6e0 !important; border-radius: 8px !important; }
-    .stButton button { background: #7c6af7 !important; color: white !important; border: none !important; border-radius: 8px !important; font-weight: 500 !important; }
     [data-testid="metric-container"] { background: #1a1a23; border: 1px solid #23232f; border-radius: 10px; padding: 12px; }
+    .stButton button { background: #7c6af7 !important; color: white !important; border: none !important; border-radius: 8px !important; font-weight: 500 !important; }
     #MainMenu, footer, header { visibility: hidden; }
     .block-container { padding-top: 2rem; }
 </style>
 """, unsafe_allow_html=True)
 
-# ── Worker en background thread (una sola vez por proceso) ────────────────────
+
+# ── Worker en background thread ───────────────────────────────────────────────
 def _start_worker():
-    """Arranca el worker SQS en un thread daemon si no está corriendo."""
     if st.session_state.get("worker_started"):
         return
     st.session_state["worker_started"] = True
 
     def run():
-        # Sync inicial
         try:
             from sync.sync_engine import run_initial_sync
             run_initial_sync()
         except Exception as e:
             print(f"[worker] Error en sync inicial: {e}")
-
-        # Escuchar SQS indefinidamente
         try:
             from sync.sqs_listener import listen
             listen()
@@ -71,11 +67,33 @@ def _start_worker():
 
 _start_worker()
 
+
+# ── Función para leer archivos directo desde OpenAI ───────────────────────────
+@st.cache_data(ttl=60)  # cachea 60 segundos para no llamar la API en cada rerun
+def get_vs_files():
+    try:
+        vs_id = get_vector_store_id()
+        if not vs_id:
+            return []
+        client = get_client()
+        files = list(client.vector_stores.files.list(vector_store_id=vs_id))
+        result = []
+        for f in files:
+            if f.status == "completed":
+                try:
+                    oai_file = client.files.retrieve(f.id)
+                    result.append(oai_file.filename)
+                except:
+                    result.append(f.id)
+        return result
+    except Exception as e:
+        return []
+
+
 # ── Session state ─────────────────────────────────────────────────────────────
 if "conversation" not in st.session_state:
     st.session_state.conversation = []
 
-# ── Auto-refresh si hay sync en curso ─────────────────────────────────────────
 sync_status = get_sync_status()
 if sync_status.get("is_syncing"):
     time.sleep(2)
@@ -102,18 +120,18 @@ with st.sidebar:
 
     st.markdown("---")
 
-    tracked = get_tracked_files()
-    st.markdown(f"**Documentos indexados** ({len(tracked)})")
-    if tracked:
-        for key, info in tracked.items():
+    # Leer archivos directo desde OpenAI
+    vs_files = get_vs_files()
+    st.markdown(f"**Documentos indexados** ({len(vs_files)})")
+    if vs_files:
+        for filename in vs_files:
             st.markdown(f"""
             <div class="file-item">
-                <div class="file-item-name">📄 {info['filename']}</div>
-                <div style="font-size:0.72rem; color:#555566; margin-top:2px;">Sync: {info.get('last_synced','')[:10]}</div>
+                <div class="file-item-name">📄 {filename}</div>
             </div>
             """, unsafe_allow_html=True)
     else:
-        st.caption("Sincronizando documentos desde S3...")
+        st.caption("Cargando documentos...")
 
     st.markdown("---")
 
@@ -133,6 +151,7 @@ with st.sidebar:
         st.session_state.conversation = []
         st.rerun()
 
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 st.markdown(f"""
 <div class="app-header">{APP_TITLE}</div>
@@ -141,13 +160,11 @@ st.markdown(f"""
 
 if sync_status.get("is_syncing"):
     current_file = sync_status.get("current_file", "documentos")
-    st.markdown(f"""
-    <div class="sync-banner">⟳ Actualizando base de conocimiento: <strong>{current_file}</strong> — podés seguir consultando normalmente.</div>
-    """, unsafe_allow_html=True)
+    st.markdown(f'<div class="sync-banner">⟳ Actualizando: <strong>{current_file}</strong> — podés seguir consultando.</div>', unsafe_allow_html=True)
 
 col1, col2, col3 = st.columns(3)
-with col1: st.metric("Documentos", len(get_tracked_files()))
-with col2: st.metric("Vector Store", "Activo" if get_vector_store_id() else "Iniciando...")
+with col1: st.metric("Documentos", len(vs_files))
+with col2: st.metric("Vector Store", "Activo" if vs_id else "Iniciando...")
 with col3: st.metric("Mensajes", len(st.session_state.conversation) // 2)
 
 st.markdown("---")
@@ -169,8 +186,8 @@ else:
             with st.chat_message("assistant", avatar="🤖"):
                 st.markdown(msg["content"])
 
-if not get_vector_store_id():
-    st.info("⏳ Sincronización inicial en curso, esperá unos segundos y recargá la página.")
+if not vs_id:
+    st.info("⏳ Inicializando Vector Store, esperá unos segundos y recargá.")
 else:
     user_input = st.chat_input("Escribí tu pregunta sobre los documentos...")
     if user_input and user_input.strip():

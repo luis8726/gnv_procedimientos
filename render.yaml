@@ -1,0 +1,44 @@
+services:
+  - type: web
+    name: gnv-procedimientos-app
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: streamlit run app.py --server.port $PORT --server.address 0.0.0.0
+    envVars:
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: AWS_ACCESS_KEY_ID
+        sync: false
+      - key: AWS_SECRET_ACCESS_KEY
+        sync: false
+      - key: AWS_REGION
+        value: us-east-1
+      - key: S3_BUCKET_NAME
+        value: gnv-procedimientos
+      - key: SQS_QUEUE_URL
+        sync: false
+      - key: APP_TITLE
+        value: GNV Procedimientos
+      - key: OPENAI_VECTOR_STORE_ID
+        sync: false
+
+  - type: worker
+    name: gnv-procedimientos-worker
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python worker.py
+    envVars:
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: AWS_ACCESS_KEY_ID
+        sync: false
+      - key: AWS_SECRET_ACCESS_KEY
+        sync: false
+      - key: AWS_REGION
+        value: us-east-1
+      - key: S3_BUCKET_NAME
+        value: gnv-procedimientos
+      - key: SQS_QUEUE_URL
+        sync: false
+      - key: OPENAI_VECTOR_STORE_ID
+        sync: false

@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: gnv-procedimientos
+    name: gvn-procedimientos
     runtime: python
     plan: free
     buildCommand: pip install -r requirements.txt
@@ -15,10 +15,10 @@ services:
       - key: AWS_REGION
         value: us-east-1
       - key: S3_BUCKET_NAME
-        value: gnv-procedimientos
+        value: gvn-procedimientos
       - key: SQS_QUEUE_URL
         sync: false
       - key: OPENAI_VECTOR_STORE_ID
         value: vs_69cf2a90b96881918dcee900775d45b7
       - key: APP_TITLE
-        value: GNV Procedimientos
+        value: GVN Procedimientos

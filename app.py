@@ -1,9 +1,8 @@
 """
-app.py — Streamlit MVP. Lee archivos directamente desde OpenAI VS.
+app.py — Streamlit MVP. Sin worker embebido — corre como servicio separado en Render.
 """
 
 import os
-import threading
 import time
 
 import streamlit as st
@@ -24,7 +23,6 @@ from sync.state import get_sync_status, get_vector_store_id
 from chat.chat_engine import chat
 from vectorstore.vs_manager import get_client
 
-# ── Estilos ───────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:wght@300;400;500;600&display=swap');
@@ -44,32 +42,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
-# ── Worker en background thread ───────────────────────────────────────────────
-def _start_worker():
-    if st.session_state.get("worker_started"):
-        return
-    st.session_state["worker_started"] = True
-
-    def run():
-        try:
-            from sync.sync_engine import run_initial_sync
-            run_initial_sync()
-        except Exception as e:
-            print(f"[worker] Error en sync inicial: {e}")
-        try:
-            from sync.sqs_listener import listen
-            listen()
-        except Exception as e:
-            print(f"[worker] Error en listener SQS: {e}")
-
-    t = threading.Thread(target=run, daemon=True, name="sqs-worker")
-    t.start()
-
-_start_worker()
-
-
-# ── Función para leer archivos directo desde OpenAI ───────────────────────────
-@st.cache_data(ttl=60)  # cachea 60 segundos para no llamar la API en cada rerun
+@st.cache_data(ttl=60)
 def get_vs_files():
     try:
         vs_id = get_vector_store_id()
@@ -86,11 +59,10 @@ def get_vs_files():
                 except:
                     result.append(f.id)
         return result
-    except Exception as e:
+    except:
         return []
 
 
-# ── Session state ─────────────────────────────────────────────────────────────
 if "conversation" not in st.session_state:
     st.session_state.conversation = []
 
@@ -99,7 +71,9 @@ if sync_status.get("is_syncing"):
     time.sleep(2)
     st.rerun()
 
-# ── Sidebar ───────────────────────────────────────────────────────────────────
+vs_id = get_vector_store_id()
+vs_files = get_vs_files()
+
 with st.sidebar:
     st.markdown(f"""
     <div style="margin-bottom:1.5rem;">
@@ -109,8 +83,6 @@ with st.sidebar:
     """, unsafe_allow_html=True)
 
     st.markdown("---")
-
-    vs_id = get_vector_store_id()
     st.markdown("**Vector Store**")
     if vs_id:
         st.markdown('<span style="color:#4ade80; font-size:0.8rem;">● Activo</span>', unsafe_allow_html=True)
@@ -119,22 +91,14 @@ with st.sidebar:
         st.markdown('<span style="color:#fb923c; font-size:0.8rem;">● Inicializando...</span>', unsafe_allow_html=True)
 
     st.markdown("---")
-
-    # Leer archivos directo desde OpenAI
-    vs_files = get_vs_files()
     st.markdown(f"**Documentos indexados** ({len(vs_files)})")
     if vs_files:
         for filename in vs_files:
-            st.markdown(f"""
-            <div class="file-item">
-                <div class="file-item-name">📄 {filename}</div>
-            </div>
-            """, unsafe_allow_html=True)
+            st.markdown(f'<div class="file-item"><div class="file-item-name">📄 {filename}</div></div>', unsafe_allow_html=True)
     else:
         st.caption("Cargando documentos...")
 
     st.markdown("---")
-
     last_result = sync_status.get("last_result")
     if last_result:
         ts = last_result.get("timestamp", "")[:16].replace("T", " ")
@@ -146,21 +110,17 @@ with st.sidebar:
         cols[2].metric("🗑️", len(last_result.get("deleted", [])))
 
     st.markdown("---")
-
     if st.button("🗑️ Limpiar conversación", use_container_width=True):
         st.session_state.conversation = []
         st.rerun()
 
-
-# ── Main ──────────────────────────────────────────────────────────────────────
 st.markdown(f"""
 <div class="app-header">{APP_TITLE}</div>
 <div class="app-subtitle">Consultá los documentos técnicos en lenguaje natural</div>
 """, unsafe_allow_html=True)
 
 if sync_status.get("is_syncing"):
-    current_file = sync_status.get("current_file", "documentos")
-    st.markdown(f'<div class="sync-banner">⟳ Actualizando: <strong>{current_file}</strong> — podés seguir consultando.</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="sync-banner">⟳ Actualizando: <strong>{sync_status.get("current_file","")}</strong> — podés seguir consultando.</div>', unsafe_allow_html=True)
 
 col1, col2, col3 = st.columns(3)
 with col1: st.metric("Documentos", len(vs_files))
@@ -171,10 +131,9 @@ st.markdown("---")
 
 if not st.session_state.conversation:
     st.markdown("""
-    <div style="text-align:center; padding:3rem 1rem; color:#3a3a4a;">
+    <div style="text-align:center; padding:3rem 1rem;">
         <div style="font-size:2.5rem; margin-bottom:1rem;">💬</div>
         <div style="font-size:1rem; color:#5a5a6a;">Hacé tu primera pregunta sobre los documentos</div>
-        <div style="font-size:0.8rem; color:#3a3a4a; margin-top:0.5rem;">Los documentos se sincronizan automáticamente desde S3</div>
     </div>
     """, unsafe_allow_html=True)
 else:

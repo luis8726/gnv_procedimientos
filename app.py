@@ -45,10 +45,13 @@ st.markdown("""
 
 
 # ── Worker en background thread — arranca una sola vez por proceso ────────────
+_worker_running = False
+
 def _start_worker():
-    if st.session_state.get("worker_started"):
+    global _worker_running
+    if _worker_running:
         return
-    st.session_state["worker_started"] = True
+    _worker_running = True
 
     def run():
         try:

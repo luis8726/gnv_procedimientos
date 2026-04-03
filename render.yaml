@@ -19,6 +19,6 @@ services:
       - key: SQS_QUEUE_URL
         sync: false
       - key: OPENAI_VECTOR_STORE_ID
-        value: vs_69cf2a90b96881918dcee900775d45b7
+        value: vs_69cffb2c3bcc81919ae91a5f78097305
       - key: APP_TITLE
         value: GVN Procedimientos

@@ -1,8 +1,10 @@
 """
-app.py — Streamlit MVP. Sin worker embebido — corre como servicio separado en Render.
+app.py — Streamlit MVP con worker SQS en background thread.
+UptimeRobot hace ping cada 5 min para mantener Render activo.
 """
 
 import os
+import threading
 import time
 
 import streamlit as st
@@ -40,6 +42,30 @@ st.markdown("""
     .block-container { padding-top: 2rem; }
 </style>
 """, unsafe_allow_html=True)
+
+
+# ── Worker en background thread — arranca una sola vez por proceso ────────────
+def _start_worker():
+    if st.session_state.get("worker_started"):
+        return
+    st.session_state["worker_started"] = True
+
+    def run():
+        try:
+            from sync.sync_engine import run_initial_sync
+            run_initial_sync()
+        except Exception as e:
+            print(f"[worker] Error en sync inicial: {e}")
+        try:
+            from sync.sqs_listener import listen
+            listen()
+        except Exception as e:
+            print(f"[worker] Error en listener SQS: {e}")
+
+    t = threading.Thread(target=run, daemon=True, name="sqs-worker")
+    t.start()
+
+_start_worker()
 
 
 @st.cache_data(ttl=60)
